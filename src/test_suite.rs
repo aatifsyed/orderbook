@@ -1,14 +1,10 @@
-use itertools::Itertools;
 use num::{One, Unsigned, Zero};
 use pretty_assertions::assert_eq;
-use std::{
-    fmt::{self, Debug},
-    ops::ControlFlow,
-};
+use std::fmt::{self, Debug};
 
 use crate::api::{
-    BuyResult, CancelResult, Order, OrderBookApi, QueryResult, ReportingOrderBookApi, SellResult,
-    UnconditionalBuyResult, UnconditionalOrderBookApi, UnconditionalSellResult,
+    Order, OrderBookApi, QueryResult, ReportingOrderBookApi, UnconditionalBuyResult,
+    UnconditionalOrderBookApi, UnconditionalSellResult,
 };
 
 struct OrderMatcher<QuantityT, PriceT, OrderIdT> {
@@ -229,7 +225,7 @@ where
     assert!(is_empty(&order_book));
 }
 
-pub fn buys_have_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
+pub fn buys_reported_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
     QuantityT: One + Debug + PartialEq + Unsigned,
@@ -237,8 +233,8 @@ where
     OrderIdT: Debug + PartialEq,
 {
     let mut order_book = T::default();
-    let miserly = buy_unexecuted(&mut order_book, one(), one());
     let generous = buy_unexecuted(&mut order_book, one(), two());
+    let miserly = buy_unexecuted(&mut order_book, one(), one());
     let generous_and_late = buy_unexecuted(&mut order_book, one(), two());
     assert_eq!(
         vec![
@@ -247,5 +243,26 @@ where
             order!(id = miserly)
         ],
         order_book.buys(),
+    );
+}
+
+pub fn sells_reported_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
+where
+    T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
+    QuantityT: One + Debug + PartialEq + Unsigned,
+    PriceT: One + Zero + Debug + PartialEq,
+    OrderIdT: Debug + PartialEq,
+{
+    let mut order_book = T::default();
+    let cheap = sell_unexecuted(&mut order_book, one(), one());
+    let expensive = sell_unexecuted(&mut order_book, one(), two());
+    let cheap_and_late = sell_unexecuted(&mut order_book, one(), one());
+    assert_eq!(
+        vec![
+            order!(id = cheap),
+            order!(id = cheap_and_late),
+            order!(id = expensive)
+        ],
+        order_book.sells(),
     );
 }

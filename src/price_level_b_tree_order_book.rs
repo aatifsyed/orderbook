@@ -12,6 +12,7 @@ use std::{
 };
 use tap::Tap as _;
 
+#[derive(Debug, Clone)]
 pub struct PriceLevelBTreeOrderBook<QuantityT, PriceT, OrderIdT> {
     buys: BTreeMap<PriceT, NonEmpty<VecDeque<(OrderIdT, QuantityT)>>>,
     sells: BTreeMap<PriceT, NonEmpty<VecDeque<(OrderIdT, QuantityT)>>>,
@@ -30,6 +31,7 @@ impl<QuantityT, PriceT, OrderIdT> Default
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum BuyOrSell<T> {
     Buy(T),
     Sell(T),
@@ -215,7 +217,7 @@ where
             Some(BuyOrSell::Buy(level)) => {
                 let quantity = self
                     .buys
-                    .get(&level)
+                    .get(level)
                     .expect("stale ids_to_price_level")
                     .iter()
                     .find_map(|(it_id, quantity)| match it_id == &id {
@@ -231,7 +233,7 @@ where
             Some(BuyOrSell::Sell(level)) => {
                 let quantity = self
                     .sells
-                    .get(&level)
+                    .get(level)
                     .expect("stale ids_to_price_level")
                     .iter()
                     .find_map(|(it_id, quantity)| match it_id == &id {
@@ -249,10 +251,28 @@ where
     }
 
     #[tracing::instrument(skip(self), ret)]
-    fn cancel(&self, id: uuid::Uuid) -> CancelResult {
-        match self.ids_to_price_level.get(&id) {
-            Some(BuyOrSell::Buy(_level)) => todo!(),
-            Some(BuyOrSell::Sell(_level)) => todo!(),
+    fn cancel(&mut self, id: uuid::Uuid) -> CancelResult {
+        match self.ids_to_price_level.remove(&id) {
+            Some(BuyOrSell::Buy(price)) => {
+                let level = self.buys.remove(&price).expect("stale ids_to_price_level");
+                match level.pop_once_by(|(it_id, _)| it_id == &id) {
+                    (Some(remaining_level), (_, _quantity)) => {
+                        self.buys.insert_uncontended(price, remaining_level)
+                    }
+                    (None, (_, _quantity)) => {}
+                }
+                CancelResult::Cancelled
+            }
+            Some(BuyOrSell::Sell(price)) => {
+                let level = self.sells.remove(&price).expect("stale ids_to_price_level");
+                match level.pop_once_by(|(it_id, _)| it_id == &id) {
+                    (Some(remaining_level), (_, _quantity)) => {
+                        self.buys.insert_uncontended(price, remaining_level)
+                    }
+                    (None, (_, _quantity)) => {}
+                }
+                CancelResult::Cancelled
+            }
             None => CancelResult::NoSuchOrder,
         }
     }
@@ -267,11 +287,12 @@ where
     fn buys(&self) -> Vec<Order<QuantityT, PriceT, uuid::Uuid>> {
         self.buys
             .iter()
+            .rev()
             .flat_map(|(price, level)| {
                 level.iter().map(|(id, quantity)| Order {
                     quantity: quantity.clone(),
                     unit_price: price.clone(),
-                    id: id.clone(),
+                    id: *id,
                 })
             })
             .collect()
@@ -280,12 +301,11 @@ where
     fn sells(&self) -> Vec<Order<QuantityT, PriceT, uuid::Uuid>> {
         self.sells
             .iter()
-            .rev()
             .flat_map(|(price, level)| {
                 level.iter().map(|(id, quantity)| Order {
                     quantity: quantity.clone(),
                     unit_price: price.clone(),
-                    id: id.clone(),
+                    id: *id,
                 })
             })
             .collect()
@@ -294,69 +314,29 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use test_log::test;
-    #[test]
-    fn default_is_empty() {
-        crate::test_suite::default_is_empty::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
+    use super::PriceLevelBTreeOrderBook;
+
+    macro_rules! do_test_suite {
+        ($ty:ty {
+            $($fn_name:ident),* $(,)?
+        }) => {
+            $(
+                #[test_log::test]
+                fn $fn_name() {
+                    crate::test_suite::$fn_name::<$ty, _, _, _>();
+                }
+            )*
+        };
     }
-    #[test]
-    fn zero_quantity_orders_are_rejected() {
-        crate::test_suite::zero_quantity_orders_are_rejected::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
-    }
-    #[test]
-    fn add_query_remove_single_buy_order() {
-        crate::test_suite::add_query_remove_single_buy_order::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
-    }
-    #[test]
-    fn add_query_remove_single_sell_order() {
-        crate::test_suite::add_query_remove_single_sell_order::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
-    }
-    #[test]
-    fn single_resident_buy_is_fully_executed() {
-        crate::test_suite::single_resident_buy_is_fully_executed::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
-    }
-    #[test]
-    fn single_resident_sell_is_fully_executed() {
-        crate::test_suite::single_resident_sell_is_fully_executed::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
-    }
-    #[test]
-    fn buys_have_price_time_priority() {
-        crate::test_suite::buys_have_price_time_priority::<
-            PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid>,
-            _,
-            _,
-            _,
-        >();
-    }
+
+    do_test_suite! {PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid> {
+        default_is_empty,
+        zero_quantity_orders_are_rejected,
+        add_query_remove_single_buy_order,
+        add_query_remove_single_sell_order,
+        single_resident_buy_is_fully_executed,
+        single_resident_sell_is_fully_executed,
+        buys_reported_with_price_time_priority,
+        sells_reported_with_price_time_priority,
+    }}
 }

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, iter::FusedIterator, ops::ControlFlow};
+use std::{fmt::Debug, ops::ControlFlow};
 
 use enum_as_inner::EnumAsInner;
 use num::Unsigned;
@@ -23,7 +23,7 @@ where
 
     fn query(&self, id: OrderIdT) -> QueryResult<QuantityT, PriceT>;
 
-    fn cancel(&self, id: OrderIdT) -> CancelResult;
+    fn cancel(&mut self, id: OrderIdT) -> CancelResult;
 }
 
 pub struct ConditionalBuyArgs<'a, OrderIdT> {
