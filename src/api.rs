@@ -1,38 +1,37 @@
-use std::ops::ControlFlow;
+use std::{fmt::Debug, iter::FusedIterator, ops::ControlFlow};
 
 use enum_as_inner::EnumAsInner;
 use num::Unsigned;
 
-pub trait OrderBookApi<BuyAbortReasonT = (), SellAbortReasonT = ()> {
-    type QuantityT: Unsigned;
-    type PriceT;
-    type OrderIdT;
-
-    fn conditional_buy(
+pub trait OrderBookApi<QuantityT, PriceT, OrderIdT>
+where
+    QuantityT: Unsigned,
+{
+    fn conditional_buy<BuyAbortReasonT: Debug>(
         &mut self,
-        quantity: Self::QuantityT,
-        unit_price: Self::PriceT,
-        condition: impl FnOnce(
-            Self::QuantityT,
-            Self::PriceT,
-            Self::OrderIdT,
-        ) -> ControlFlow<BuyAbortReasonT, ()>,
-    ) -> BuyResult<Self::QuantityT, Self::OrderIdT, BuyAbortReasonT>;
+        quantity: QuantityT,
+        unit_price: PriceT,
+        condition: impl FnOnce(ConditionalBuyArgs<'_, OrderIdT>) -> ControlFlow<BuyAbortReasonT, ()>,
+    ) -> BuyResult<QuantityT, OrderIdT, BuyAbortReasonT>;
 
-    fn conditional_sell(
+    fn conditional_sell<SellAbortReasonT: Debug>(
         &mut self,
-        quantity: Self::QuantityT,
-        unit_price: Self::PriceT,
-        condition: impl FnOnce(
-            Self::QuantityT,
-            Self::PriceT,
-            Self::OrderIdT,
-        ) -> ControlFlow<SellAbortReasonT, ()>,
-    ) -> SellResult<Self::QuantityT, Self::OrderIdT, SellAbortReasonT>;
+        quantity: QuantityT,
+        unit_price: PriceT,
+        condition: impl FnOnce(ConditionalSellArgs<'_, OrderIdT>) -> ControlFlow<SellAbortReasonT, ()>,
+    ) -> SellResult<QuantityT, OrderIdT, SellAbortReasonT>;
 
-    fn query(&self, id: Self::OrderIdT) -> QueryResult<Self::QuantityT, Self::PriceT>;
+    fn query(&self, id: OrderIdT) -> QueryResult<QuantityT, PriceT>;
 
-    fn cancel(&self, id: Self::OrderIdT) -> CancelResult;
+    fn cancel(&self, id: OrderIdT) -> CancelResult;
+}
+
+pub struct ConditionalBuyArgs<'a, OrderIdT> {
+    pub seller_id: &'a OrderIdT,
+}
+
+pub struct ConditionalSellArgs<'a, OrderIdT> {
+    pub buyer_id: &'a OrderIdT,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
@@ -67,7 +66,7 @@ pub enum SellResult<QuantityT, OrderIdT, BuyAbortReasonT> {
         id: OrderIdT,
     },
     MutualFullExecution {
-        seller: OrderIdT,
+        buyer: OrderIdT,
     },
     BuyerFullyExecuted {
         buyer: OrderIdT,
@@ -75,7 +74,7 @@ pub enum SellResult<QuantityT, OrderIdT, BuyAbortReasonT> {
     },
     SellerFullyExecuted {
         buyer: OrderIdT,
-        sellers_remaining: QuantityT,
+        buyers_remaining: QuantityT,
     },
 }
 
@@ -98,33 +97,39 @@ pub enum CancelResult {
     Cancelled,
 }
 
-pub trait ReportingOrderBookApi: OrderBookApi {
-    type BuyReport: Iterator<Item = Order<Self::QuantityT, Self::PriceT, Self::OrderIdT>>;
-    type SellReport: Iterator<Item = Order<Self::QuantityT, Self::PriceT, Self::OrderIdT>>;
+pub trait ReportingOrderBookApi<QuantityT, PriceT, OrderIdT>:
+    OrderBookApi<QuantityT, PriceT, OrderIdT>
+where
+    QuantityT: Unsigned,
+{
     // most-generous first
-    fn buys(&self) -> Self::BuyReport;
+    fn buys(&self) -> Vec<Order<QuantityT, PriceT, OrderIdT>>;
     // cheapest first
-    fn sells(&self) -> Self::SellReport;
+    fn sells(&self) -> Vec<Order<QuantityT, PriceT, OrderIdT>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Order<QuantityT, PriceT, OrderIdT> {
-    quantity: QuantityT,
-    unit_price: PriceT,
-    id: OrderIdT,
+    pub quantity: QuantityT,
+    pub unit_price: PriceT,
+    pub id: OrderIdT,
 }
 
-pub trait UnconditionalOrderBookApi: OrderBookApi {
+pub trait UnconditionalOrderBookApi<QuantityT, PriceT, OrderIdT>:
+    OrderBookApi<QuantityT, PriceT, OrderIdT>
+where
+    QuantityT: Unsigned,
+{
     fn unconditional_buy(
         &mut self,
-        quantity: Self::QuantityT,
-        unit_price: Self::PriceT,
-    ) -> UnconditionalBuyResult<Self::QuantityT, Self::OrderIdT>;
+        quantity: QuantityT,
+        unit_price: PriceT,
+    ) -> UnconditionalBuyResult<QuantityT, OrderIdT>;
     fn unconditional_sell(
         &mut self,
-        quantity: Self::QuantityT,
-        unit_price: Self::PriceT,
-    ) -> UnconditionalSellResult<Self::QuantityT, Self::OrderIdT>;
+        quantity: QuantityT,
+        unit_price: PriceT,
+    ) -> UnconditionalSellResult<QuantityT, OrderIdT>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
@@ -153,7 +158,7 @@ pub enum UnconditionalSellResult<QuantityT, OrderIdT> {
         id: OrderIdT,
     },
     MutualFullExecution {
-        seller: OrderIdT,
+        buyer: OrderIdT,
     },
     BuyerFullyExecuted {
         buyer: OrderIdT,
@@ -165,16 +170,17 @@ pub enum UnconditionalSellResult<QuantityT, OrderIdT> {
     },
 }
 
-impl<T> UnconditionalOrderBookApi for T
+impl<T, QuantityT, PriceT, OrderIdT> UnconditionalOrderBookApi<QuantityT, PriceT, OrderIdT> for T
 where
-    T: OrderBookApi,
+    T: OrderBookApi<QuantityT, PriceT, OrderIdT>,
+    QuantityT: Unsigned,
 {
     fn unconditional_buy(
         &mut self,
-        quantity: Self::QuantityT,
-        unit_price: Self::PriceT,
-    ) -> UnconditionalBuyResult<Self::QuantityT, Self::OrderIdT> {
-        match self.conditional_buy(quantity, unit_price, |_, _, _| ControlFlow::Continue(())) {
+        quantity: QuantityT,
+        unit_price: PriceT,
+    ) -> UnconditionalBuyResult<QuantityT, OrderIdT> {
+        match self.conditional_buy(quantity, unit_price, |_| ControlFlow::<()>::Continue(())) {
             BuyResult::QuantityWasZero => UnconditionalBuyResult::QuantityWasZero,
             BuyResult::AbortedOnCondition { .. } => {
                 unreachable!("conditional_buy was aborted but no condition was given")
@@ -202,17 +208,17 @@ where
 
     fn unconditional_sell(
         &mut self,
-        quantity: Self::QuantityT,
-        unit_price: Self::PriceT,
-    ) -> UnconditionalSellResult<Self::QuantityT, Self::OrderIdT> {
-        match self.conditional_sell(quantity, unit_price, |_, _, _| ControlFlow::Continue(())) {
+        quantity: QuantityT,
+        unit_price: PriceT,
+    ) -> UnconditionalSellResult<QuantityT, OrderIdT> {
+        match self.conditional_sell(quantity, unit_price, |_| ControlFlow::<()>::Continue(())) {
             SellResult::QuantityWasZero => UnconditionalSellResult::QuantityWasZero,
             SellResult::AbortedOnCondition { .. } => {
                 unreachable!("conditional_sell was aborted but no condition was given")
             }
             SellResult::EnteredOrderBook { id } => UnconditionalSellResult::EnteredOrderBook { id },
-            SellResult::MutualFullExecution { seller } => {
-                UnconditionalSellResult::MutualFullExecution { seller }
+            SellResult::MutualFullExecution { buyer: seller } => {
+                UnconditionalSellResult::MutualFullExecution { buyer: seller }
             }
             SellResult::BuyerFullyExecuted {
                 buyer,
@@ -223,7 +229,7 @@ where
             },
             SellResult::SellerFullyExecuted {
                 buyer,
-                sellers_remaining,
+                buyers_remaining: sellers_remaining,
             } => UnconditionalSellResult::SellerFullyExecuted {
                 buyer,
                 sellers_remaining,
