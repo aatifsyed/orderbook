@@ -338,5 +338,7 @@ mod tests {
         single_resident_sell_is_fully_executed,
         buys_reported_with_price_time_priority,
         sells_reported_with_price_time_priority,
+        buys_execute_with_price_time_priority,
+        sells_execute_with_price_time_priority,
     }}
 }

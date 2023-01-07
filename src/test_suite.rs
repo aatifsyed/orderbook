@@ -157,11 +157,11 @@ where
     let mut order_book = T::default();
     let id = buy_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        order_book.query(id.clone()),
         QueryResult::Buy {
             quantity: one(),
             unit_price: one()
-        }
+        },
+        order_book.query(id.clone()),
     );
     assert!(order_book.cancel(id.clone()).is_cancelled());
     assert!(order_book.query(id).is_no_such_order());
@@ -178,11 +178,11 @@ where
     let mut order_book = T::default();
     let id = sell_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        order_book.query(id.clone()),
         QueryResult::Sell {
             quantity: one(),
             unit_price: one()
-        }
+        },
+        order_book.query(id.clone()),
     );
     assert!(order_book.cancel(id.clone()).is_cancelled());
     assert!(order_book.query(id).is_no_such_order());
@@ -199,10 +199,10 @@ where
     let mut order_book = T::default();
     let resident_buy = buy_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        order_book.unconditional_sell(one(), one()),
         UnconditionalSellResult::MutualFullExecution {
             buyer: resident_buy
-        }
+        },
+        order_book.unconditional_sell(one(), one()),
     );
     assert!(is_empty(&order_book));
 }
@@ -264,5 +264,59 @@ where
             order!(id = expensive)
         ],
         order_book.sells(),
+    );
+}
+
+pub fn buys_execute_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
+where
+    T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
+    QuantityT: One + Debug + PartialEq + Unsigned,
+    PriceT: One + Zero + Debug + PartialEq,
+    OrderIdT: Debug + PartialEq,
+{
+    let mut order_book = T::default();
+    let generous = buy_unexecuted(&mut order_book, one(), two());
+    let miserly = buy_unexecuted(&mut order_book, one(), one());
+    let generous_and_late = buy_unexecuted(&mut order_book, one(), two());
+    assert_eq!(
+        UnconditionalSellResult::MutualFullExecution { buyer: generous },
+        order_book.unconditional_sell(one(), one())
+    );
+    assert_eq!(
+        UnconditionalSellResult::MutualFullExecution {
+            buyer: generous_and_late
+        },
+        order_book.unconditional_sell(one(), one())
+    );
+    assert_eq!(
+        UnconditionalSellResult::MutualFullExecution { buyer: miserly },
+        order_book.unconditional_sell(one(), one())
+    );
+}
+
+pub fn sells_execute_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
+where
+    T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
+    QuantityT: One + Debug + PartialEq + Unsigned,
+    PriceT: One + Zero + Debug + PartialEq,
+    OrderIdT: Debug + PartialEq,
+{
+    let mut order_book = T::default();
+    let cheap = sell_unexecuted(&mut order_book, one(), one());
+    let expensive = sell_unexecuted(&mut order_book, one(), two());
+    let cheap_and_late = sell_unexecuted(&mut order_book, one(), one());
+    assert_eq!(
+        UnconditionalBuyResult::MutualFullExecution { seller: cheap },
+        order_book.unconditional_buy(one(), two())
+    );
+    assert_eq!(
+        UnconditionalBuyResult::MutualFullExecution {
+            seller: cheap_and_late
+        },
+        order_book.unconditional_buy(one(), two())
+    );
+    assert_eq!(
+        UnconditionalBuyResult::MutualFullExecution { seller: expensive },
+        order_book.unconditional_buy(one(), two())
     );
 }
