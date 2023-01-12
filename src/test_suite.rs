@@ -4,8 +4,8 @@ use pretty_assertions::assert_eq;
 use std::fmt::{self, Debug};
 
 use crate::api::{
-    Order, OrderBookApi, QueryResult, ReportingOrderBookApi, UnconditionalBuyResult,
-    UnconditionalOrderBookApi, UnconditionalSellResult,
+    BuyEntryOrExecution, BuyOrSell, Order, OrderBookApi, ReportingOrderBookApi,
+    SellEntryOrExecution, UnconditionalOrderBookApi,
 };
 
 struct OrderMatcher<QuantityT, PriceT, OrderIdT> {
@@ -137,14 +137,14 @@ where
     let mut order_book = T::default();
     let id = buy_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        QueryResult::Buy {
+        Ok(BuyOrSell::Buy {
             quantity: one(),
             unit_price: one()
-        },
+        }),
         order_book.query(id.clone()),
     );
-    assert!(order_book.cancel(id.clone()).is_cancelled());
-    assert!(order_book.query(id).is_no_such_order());
+    assert!(order_book.cancel(id.clone()).is_ok());
+    assert!(order_book.query(id).is_err());
     assert!(is_empty(&order_book));
 }
 
@@ -158,14 +158,14 @@ where
     let mut order_book = T::default();
     let id = sell_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        QueryResult::Sell {
+        Ok(BuyOrSell::Sell {
             quantity: one(),
             unit_price: one()
-        },
+        }),
         order_book.query(id.clone()),
     );
-    assert!(order_book.cancel(id.clone()).is_cancelled());
-    assert!(order_book.query(id).is_no_such_order());
+    assert!(order_book.cancel(id.clone()).is_ok());
+    assert!(order_book.query(id).is_err());
     assert!(is_empty(&order_book));
 }
 
@@ -179,7 +179,7 @@ where
     let mut order_book = T::default();
     let resident_buy = buy_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        UnconditionalSellResult::MutualFullExecution {
+        SellEntryOrExecution::MutualFullExecution {
             buyer: resident_buy
         },
         order_book.unconditional_sell(one(), one()),
@@ -198,7 +198,7 @@ where
     let resident_sell = sell_unexecuted(&mut order_book, one(), one());
     assert_eq!(
         order_book.unconditional_buy(one(), one()),
-        UnconditionalBuyResult::MutualFullExecution {
+        BuyEntryOrExecution::MutualFullExecution {
             seller: resident_sell
         }
     );
@@ -259,17 +259,17 @@ where
     let miserly = buy_unexecuted(&mut order_book, one(), one());
     let generous_and_late = buy_unexecuted(&mut order_book, one(), two());
     assert_eq!(
-        UnconditionalSellResult::MutualFullExecution { buyer: generous },
+        SellEntryOrExecution::MutualFullExecution { buyer: generous },
         order_book.unconditional_sell(one(), one())
     );
     assert_eq!(
-        UnconditionalSellResult::MutualFullExecution {
+        SellEntryOrExecution::MutualFullExecution {
             buyer: generous_and_late
         },
         order_book.unconditional_sell(one(), one())
     );
     assert_eq!(
-        UnconditionalSellResult::MutualFullExecution { buyer: miserly },
+        SellEntryOrExecution::MutualFullExecution { buyer: miserly },
         order_book.unconditional_sell(one(), one())
     );
 }
@@ -286,17 +286,17 @@ where
     let expensive = sell_unexecuted(&mut order_book, one(), two());
     let cheap_and_late = sell_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        UnconditionalBuyResult::MutualFullExecution { seller: cheap },
+        BuyEntryOrExecution::MutualFullExecution { seller: cheap },
         order_book.unconditional_buy(one(), two())
     );
     assert_eq!(
-        UnconditionalBuyResult::MutualFullExecution {
+        BuyEntryOrExecution::MutualFullExecution {
             seller: cheap_and_late
         },
         order_book.unconditional_buy(one(), two())
     );
     assert_eq!(
-        UnconditionalBuyResult::MutualFullExecution { seller: expensive },
+        BuyEntryOrExecution::MutualFullExecution { seller: expensive },
         order_book.unconditional_buy(one(), two())
     );
 }

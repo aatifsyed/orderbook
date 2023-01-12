@@ -1,6 +1,6 @@
 use crate::api::{
-    BuyResult, CancelResult, ConditionalBuyArgs, ConditionalSellArgs, Order, OrderBookApi,
-    QueryResult, ReportingOrderBookApi, SellResult,
+    BuyEntryOrExecution, BuyOrSell, Cancelled, ConditionalBuyArgs, ConditionalSellArgs,
+    NoSuchOrder, Order, OrderBookApi, ReportingOrderBookApi, SellEntryOrExecution,
 };
 use crate::util::{BTreeMapExt as _, NonEmpty};
 use num::Unsigned;
@@ -17,7 +17,7 @@ use tap::Tap as _;
 pub struct PriceLevelBTreeOrderBook<QuantityT, PriceT, OrderIdT> {
     buys: BTreeMap<PriceT, NonEmpty<VecDeque<(OrderIdT, QuantityT)>>>,
     sells: BTreeMap<PriceT, NonEmpty<VecDeque<(OrderIdT, QuantityT)>>>,
-    ids_to_price_level: HashMap<OrderIdT, BuyOrSell<PriceT>>,
+    ids_to_price_level: HashMap<OrderIdT, BuyOrSellAtPriceLevel<PriceT>>,
 }
 
 impl<QuantityT, PriceT, OrderIdT> Default
@@ -33,7 +33,7 @@ impl<QuantityT, PriceT, OrderIdT> Default
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum BuyOrSell<T> {
+enum BuyOrSellAtPriceLevel<T> {
     Buy(T),
     Sell(T),
 }
@@ -52,9 +52,9 @@ where
         condition: impl FnOnce(
             ConditionalBuyArgs<'_, uuid::Uuid>,
         ) -> std::ops::ControlFlow<BuyAbortReasonT, ()>,
-    ) -> BuyResult<QuantityT, uuid::Uuid, BuyAbortReasonT> {
+    ) -> Result<BuyEntryOrExecution<QuantityT, uuid::Uuid>, BuyAbortReasonT> {
         let quantity = quantity.into_inner();
-        match self.sells.first_entry() {
+        let entry_or_exc = match self.sells.first_entry() {
             // A trade could occur
             Some(ask_level)
                 if {
@@ -65,7 +65,7 @@ where
                 if let ControlFlow::Break(reason) = condition(ConditionalBuyArgs {
                     seller_id: &ask_level.get().front().0,
                 }) {
-                    return BuyResult::AbortedOnCondition { reason };
+                    return Err(reason);
                 }
                 // a trade will occur
                 let (ask_price, level) = ask_level.remove_entry();
@@ -84,7 +84,7 @@ where
                                 None => NonEmpty::vecdeque((seller_id, sellers_remaining.clone())),
                             },
                         );
-                        BuyResult::BuyerFullyExecuted {
+                        BuyEntryOrExecution::BuyerFullyExecuted {
                             seller: seller_id,
                             sellers_remaining,
                         }
@@ -94,7 +94,7 @@ where
                         if let Some(remaining_level) = remaining_level {
                             self.sells.insert_uncontended(ask_price, remaining_level)
                         }
-                        BuyResult::MutualFullExecution { seller: seller_id }
+                        BuyEntryOrExecution::MutualFullExecution { seller: seller_id }
                     }
                     // buyer (us) wants more than the seller has
                     Ordering::Greater => {
@@ -103,7 +103,7 @@ where
                         if let Some(remaining_level) = remaining_level {
                             self.sells.insert_uncontended(ask_price, remaining_level)
                         }
-                        BuyResult::SellerFullyExecuted {
+                        BuyEntryOrExecution::SellerFullyExecuted {
                             seller: seller_id,
                             buyers_remaining,
                         }
@@ -120,10 +120,11 @@ where
                 self.ids_to_price_level
                     .entry(id)
                     .and_modify(|_| panic!("uuid collision"))
-                    .or_insert(BuyOrSell::Buy(unit_price));
-                BuyResult::EnteredOrderBook { id }
+                    .or_insert(BuyOrSellAtPriceLevel::Buy(unit_price));
+                BuyEntryOrExecution::EnteredOrderBook { id }
             }
-        }
+        };
+        Ok(entry_or_exc)
     }
 
     #[tracing::instrument(skip(self, condition), ret)]
@@ -134,9 +135,9 @@ where
         condition: impl FnOnce(
             ConditionalSellArgs<'_, uuid::Uuid>,
         ) -> std::ops::ControlFlow<SellAbortReasonT, ()>,
-    ) -> SellResult<QuantityT, uuid::Uuid, SellAbortReasonT> {
+    ) -> Result<SellEntryOrExecution<QuantityT, uuid::Uuid>, SellAbortReasonT> {
         let quantity = quantity.into_inner();
-        match self.buys.last_entry() {
+        let entry_or_exc = match self.buys.last_entry() {
             // A trade could occur
             Some(bid_level)
                 if {
@@ -147,7 +148,7 @@ where
                 if let ControlFlow::Break(reason) = condition(ConditionalSellArgs {
                     buyer_id: &bid_level.get().front().0,
                 }) {
-                    return SellResult::AbortedOnCondition { reason };
+                    return Err(reason);
                 }
                 // a trade will occur
                 let (bid_price, level) = bid_level.remove_entry();
@@ -166,7 +167,7 @@ where
                                 None => NonEmpty::vecdeque((buyer_id, buyers_remaining.clone())),
                             },
                         );
-                        SellResult::SellerFullyExecuted {
+                        SellEntryOrExecution::SellerFullyExecuted {
                             buyer: buyer_id,
                             buyers_remaining,
                         }
@@ -176,7 +177,7 @@ where
                         if let Some(remaining_level) = remaining_level {
                             self.buys.insert_uncontended(bid_price, remaining_level)
                         }
-                        SellResult::MutualFullExecution { buyer: buyer_id }
+                        SellEntryOrExecution::MutualFullExecution { buyer: buyer_id }
                     }
                     // seller (us) wants more than the buyer has
                     Ordering::Greater => {
@@ -185,7 +186,7 @@ where
                         if let Some(remaining_level) = remaining_level {
                             self.sells.insert_uncontended(bid_price, remaining_level)
                         }
-                        SellResult::BuyerFullyExecuted {
+                        SellEntryOrExecution::BuyerFullyExecuted {
                             buyer: buyer_id,
                             sellers_remaining,
                         }
@@ -202,16 +203,17 @@ where
                 self.ids_to_price_level
                     .entry(id)
                     .and_modify(|_| panic!("uuid collision"))
-                    .or_insert(BuyOrSell::Sell(unit_price));
-                SellResult::EnteredOrderBook { id }
+                    .or_insert(BuyOrSellAtPriceLevel::Sell(unit_price));
+                SellEntryOrExecution::EnteredOrderBook { id }
             }
-        }
+        };
+        Ok(entry_or_exc)
     }
 
     #[tracing::instrument(skip(self), ret)]
-    fn query(&self, id: uuid::Uuid) -> QueryResult<QuantityT, PriceT> {
+    fn query(&self, id: uuid::Uuid) -> Result<BuyOrSell<QuantityT, PriceT>, NoSuchOrder> {
         match self.ids_to_price_level.get(&id) {
-            Some(BuyOrSell::Buy(level)) => {
+            Some(BuyOrSellAtPriceLevel::Buy(level)) => {
                 let quantity = self
                     .buys
                     .get(level)
@@ -222,12 +224,12 @@ where
                         false => None,
                     })
                     .expect("stale ids_to_price_level");
-                QueryResult::Buy {
+                Ok(BuyOrSell::Buy {
                     quantity,
                     unit_price: level.clone(),
-                }
+                })
             }
-            Some(BuyOrSell::Sell(level)) => {
+            Some(BuyOrSellAtPriceLevel::Sell(level)) => {
                 let quantity = self
                     .sells
                     .get(level)
@@ -238,19 +240,19 @@ where
                         false => None,
                     })
                     .expect("stale ids_to_price_level");
-                QueryResult::Sell {
+                Ok(BuyOrSell::Sell {
                     quantity,
                     unit_price: level.clone(),
-                }
+                })
             }
-            None => QueryResult::NoSuchOrder,
+            None => Err(NoSuchOrder),
         }
     }
 
     #[tracing::instrument(skip(self), ret)]
-    fn cancel(&mut self, id: uuid::Uuid) -> CancelResult {
+    fn cancel(&mut self, id: uuid::Uuid) -> Result<Cancelled, NoSuchOrder> {
         match self.ids_to_price_level.remove(&id) {
-            Some(BuyOrSell::Buy(price)) => {
+            Some(BuyOrSellAtPriceLevel::Buy(price)) => {
                 let level = self.buys.remove(&price).expect("stale ids_to_price_level");
                 match level.pop_once_by(|(it_id, _)| it_id == &id) {
                     (Some(remaining_level), (_, _quantity)) => {
@@ -258,9 +260,9 @@ where
                     }
                     (None, (_, _quantity)) => {}
                 }
-                CancelResult::Cancelled
+                Ok(Cancelled)
             }
-            Some(BuyOrSell::Sell(price)) => {
+            Some(BuyOrSellAtPriceLevel::Sell(price)) => {
                 let level = self.sells.remove(&price).expect("stale ids_to_price_level");
                 match level.pop_once_by(|(it_id, _)| it_id == &id) {
                     (Some(remaining_level), (_, _quantity)) => {
@@ -268,9 +270,9 @@ where
                     }
                     (None, (_, _quantity)) => {}
                 }
-                CancelResult::Cancelled
+                Ok(Cancelled)
             }
-            None => CancelResult::NoSuchOrder,
+            None => Err(NoSuchOrder),
         }
     }
 }
