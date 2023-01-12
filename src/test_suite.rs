@@ -1,4 +1,5 @@
-use num::{One, Unsigned, Zero};
+use num::{One, Zero};
+use numwit::Positive;
 use pretty_assertions::assert_eq;
 use std::fmt::{self, Debug};
 
@@ -72,9 +73,6 @@ where
     }
 }
 
-fn zero<T: Zero>() -> T {
-    Zero::zero()
-}
 fn one<T: One>() -> T {
     One::one()
 }
@@ -84,7 +82,6 @@ fn two<T: One + Zero>() -> T {
 fn is_empty<T, QuantityT, PriceT, OrderIdT>(order_book: &T) -> bool
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT>,
-    QuantityT: Unsigned,
 {
     order_book.buys().is_empty() && order_book.sells().is_empty()
 }
@@ -96,10 +93,10 @@ fn buy_unexecuted<T, QuantityT, PriceT, OrderIdT>(
 where
     T: OrderBookApi<QuantityT, PriceT, OrderIdT>,
     OrderIdT: Debug,
-    QuantityT: Debug + Unsigned,
+    QuantityT: Debug + PartialOrd + Zero,
 {
     order_book
-        .unconditional_buy(quantity, unit_price)
+        .unconditional_buy(Positive::new(quantity).unwrap(), unit_price)
         .into_entered_order_book()
         .expect("buy should not have executed")
 }
@@ -111,10 +108,10 @@ fn sell_unexecuted<T, QuantityT, PriceT, OrderIdT>(
 where
     T: OrderBookApi<QuantityT, PriceT, OrderIdT>,
     OrderIdT: Debug,
-    QuantityT: Debug + Unsigned,
+    QuantityT: Debug + PartialOrd + Zero,
 {
     order_book
-        .unconditional_sell(quantity, unit_price)
+        .unconditional_sell(Positive::new(quantity).unwrap(), unit_price)
         .into_entered_order_book()
         .expect("sell should not have executed")
 }
@@ -126,31 +123,14 @@ where
 pub fn default_is_empty<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: Unsigned,
 {
     assert!(is_empty(&T::default()))
-}
-
-pub fn zero_quantity_orders_are_rejected<T, QuantityT, PriceT, OrderIdT>()
-where
-    T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: Zero + Unsigned,
-    PriceT: One,
-{
-    let mut order_book = T::default();
-    assert!(order_book
-        .unconditional_buy(zero(), one())
-        .is_quantity_was_zero());
-    assert!(order_book
-        .unconditional_sell(zero(), one())
-        .is_quantity_was_zero());
-    assert!(is_empty(&order_book));
 }
 
 pub fn add_query_remove_single_buy_order<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + PartialEq + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One + Debug + PartialEq,
     OrderIdT: Clone + Debug,
 {
@@ -171,7 +151,7 @@ where
 pub fn add_query_remove_single_sell_order<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + PartialEq + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One + Debug + PartialEq,
     OrderIdT: Clone + Debug,
 {
@@ -192,7 +172,7 @@ where
 pub fn single_resident_buy_is_fully_executed<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One,
     OrderIdT: Debug + PartialEq,
 {
@@ -210,7 +190,7 @@ where
 pub fn single_resident_sell_is_fully_executed<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One,
     OrderIdT: Debug + PartialEq,
 {
@@ -228,7 +208,7 @@ where
 pub fn buys_reported_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + PartialEq + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One + Zero + Debug + PartialEq,
     OrderIdT: Debug + PartialEq,
 {
@@ -249,7 +229,7 @@ where
 pub fn sells_reported_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + PartialEq + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One + Zero + Debug + PartialEq,
     OrderIdT: Debug + PartialEq,
 {
@@ -270,7 +250,7 @@ where
 pub fn buys_execute_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + PartialEq + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One + Zero + Debug + PartialEq,
     OrderIdT: Debug + PartialEq,
 {
@@ -297,7 +277,7 @@ where
 pub fn sells_execute_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
-    QuantityT: One + Debug + PartialEq + Unsigned,
+    QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
     PriceT: One + Zero + Debug + PartialEq,
     OrderIdT: Debug + PartialEq,
 {

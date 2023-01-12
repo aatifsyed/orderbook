@@ -4,6 +4,7 @@ use crate::api::{
 };
 use crate::util::{BTreeMapExt as _, NonEmpty};
 use num::Unsigned;
+use numwit::Positive;
 use std::fmt::Debug;
 use std::{
     cmp::Ordering,
@@ -46,15 +47,13 @@ where
     #[tracing::instrument(skip(self, condition), ret)]
     fn conditional_buy<BuyAbortReasonT: Debug>(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
         condition: impl FnOnce(
             ConditionalBuyArgs<'_, uuid::Uuid>,
         ) -> std::ops::ControlFlow<BuyAbortReasonT, ()>,
     ) -> BuyResult<QuantityT, uuid::Uuid, BuyAbortReasonT> {
-        if quantity.is_zero() {
-            return BuyResult::QuantityWasZero;
-        }
+        let quantity = quantity.into_inner();
         match self.sells.first_entry() {
             // A trade could occur
             Some(ask_level)
@@ -130,15 +129,13 @@ where
     #[tracing::instrument(skip(self, condition), ret)]
     fn conditional_sell<SellAbortReasonT: Debug>(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
         condition: impl FnOnce(
             ConditionalSellArgs<'_, uuid::Uuid>,
         ) -> std::ops::ControlFlow<SellAbortReasonT, ()>,
     ) -> SellResult<QuantityT, uuid::Uuid, SellAbortReasonT> {
-        if quantity.is_zero() {
-            return SellResult::QuantityWasZero;
-        }
+        let quantity = quantity.into_inner();
         match self.buys.last_entry() {
             // A trade could occur
             Some(bid_level)
@@ -331,7 +328,6 @@ mod tests {
 
     do_test_suite! {PriceLevelBTreeOrderBook<usize, usize, uuid::Uuid> {
         default_is_empty,
-        zero_quantity_orders_are_rejected,
         add_query_remove_single_buy_order,
         add_query_remove_single_sell_order,
         single_resident_buy_is_fully_executed,

@@ -1,22 +1,19 @@
 use std::{fmt::Debug, ops::ControlFlow};
 
 use enum_as_inner::EnumAsInner;
-use num::Unsigned;
+use numwit::Positive;
 
-pub trait OrderBookApi<QuantityT, PriceT, OrderIdT>
-where
-    QuantityT: Unsigned,
-{
+pub trait OrderBookApi<QuantityT, PriceT, OrderIdT> {
     fn conditional_buy<BuyAbortReasonT: Debug>(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
         condition: impl FnOnce(ConditionalBuyArgs<'_, OrderIdT>) -> ControlFlow<BuyAbortReasonT, ()>,
     ) -> BuyResult<QuantityT, OrderIdT, BuyAbortReasonT>;
 
     fn conditional_sell<SellAbortReasonT: Debug>(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
         condition: impl FnOnce(ConditionalSellArgs<'_, OrderIdT>) -> ControlFlow<SellAbortReasonT, ()>,
     ) -> SellResult<QuantityT, OrderIdT, SellAbortReasonT>;
@@ -36,7 +33,6 @@ pub struct ConditionalSellArgs<'a, OrderIdT> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum BuyResult<QuantityT, OrderIdT, BuyAbortReasonT> {
-    QuantityWasZero,
     AbortedOnCondition {
         reason: BuyAbortReasonT,
     },
@@ -58,7 +54,6 @@ pub enum BuyResult<QuantityT, OrderIdT, BuyAbortReasonT> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum SellResult<QuantityT, OrderIdT, BuyAbortReasonT> {
-    QuantityWasZero,
     AbortedOnCondition {
         reason: BuyAbortReasonT,
     },
@@ -99,8 +94,6 @@ pub enum CancelResult {
 
 pub trait ReportingOrderBookApi<QuantityT, PriceT, OrderIdT>:
     OrderBookApi<QuantityT, PriceT, OrderIdT>
-where
-    QuantityT: Unsigned,
 {
     // most-generous first
     fn buys(&self) -> Vec<Order<QuantityT, PriceT, OrderIdT>>;
@@ -117,24 +110,21 @@ pub struct Order<QuantityT, PriceT, OrderIdT> {
 
 pub trait UnconditionalOrderBookApi<QuantityT, PriceT, OrderIdT>:
     OrderBookApi<QuantityT, PriceT, OrderIdT>
-where
-    QuantityT: Unsigned,
 {
     fn unconditional_buy(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
     ) -> UnconditionalBuyResult<QuantityT, OrderIdT>;
     fn unconditional_sell(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
     ) -> UnconditionalSellResult<QuantityT, OrderIdT>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum UnconditionalBuyResult<QuantityT, OrderIdT> {
-    QuantityWasZero,
     EnteredOrderBook {
         id: OrderIdT,
     },
@@ -153,7 +143,6 @@ pub enum UnconditionalBuyResult<QuantityT, OrderIdT> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum UnconditionalSellResult<QuantityT, OrderIdT> {
-    QuantityWasZero,
     EnteredOrderBook {
         id: OrderIdT,
     },
@@ -173,15 +162,13 @@ pub enum UnconditionalSellResult<QuantityT, OrderIdT> {
 impl<T, QuantityT, PriceT, OrderIdT> UnconditionalOrderBookApi<QuantityT, PriceT, OrderIdT> for T
 where
     T: OrderBookApi<QuantityT, PriceT, OrderIdT>,
-    QuantityT: Unsigned,
 {
     fn unconditional_buy(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
     ) -> UnconditionalBuyResult<QuantityT, OrderIdT> {
         match self.conditional_buy(quantity, unit_price, |_| ControlFlow::<()>::Continue(())) {
-            BuyResult::QuantityWasZero => UnconditionalBuyResult::QuantityWasZero,
             BuyResult::AbortedOnCondition { .. } => {
                 unreachable!("conditional_buy was aborted but no condition was given")
             }
@@ -208,11 +195,10 @@ where
 
     fn unconditional_sell(
         &mut self,
-        quantity: QuantityT,
+        quantity: Positive<QuantityT>,
         unit_price: PriceT,
     ) -> UnconditionalSellResult<QuantityT, OrderIdT> {
         match self.conditional_sell(quantity, unit_price, |_| ControlFlow::<()>::Continue(())) {
-            SellResult::QuantityWasZero => UnconditionalSellResult::QuantityWasZero,
             SellResult::AbortedOnCondition { .. } => {
                 unreachable!("conditional_sell was aborted but no condition was given")
             }
