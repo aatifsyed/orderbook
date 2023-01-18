@@ -9,14 +9,14 @@ pub trait OrderBookApi<QuantityT, PriceT, OrderIdT> {
         quantity: Positive<QuantityT>,
         unit_price: PriceT,
         condition: impl FnOnce(ConditionalBuyArgs<'_, OrderIdT>) -> ControlFlow<BuyAbortReasonT, ()>,
-    ) -> Result<BuyEntryOrExecution<QuantityT, OrderIdT>, BuyAbortReasonT>;
+    ) -> Result<BuyEntryOrExecution<QuantityT, PriceT, OrderIdT>, BuyAbortReasonT>;
 
     fn conditional_sell<SellAbortReasonT: Debug>(
         &mut self,
         quantity: Positive<QuantityT>,
         unit_price: PriceT,
         condition: impl FnOnce(ConditionalSellArgs<'_, OrderIdT>) -> ControlFlow<SellAbortReasonT, ()>,
-    ) -> Result<SellEntryOrExecution<QuantityT, OrderIdT>, SellAbortReasonT>;
+    ) -> Result<SellEntryOrExecution<QuantityT, PriceT, OrderIdT>, SellAbortReasonT>;
 
     fn query(&self, id: OrderIdT) -> Result<BuyOrSell<QuantityT, PriceT>, NoSuchOrder>;
 
@@ -32,37 +32,43 @@ pub struct ConditionalSellArgs<'a, OrderIdT> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
-pub enum BuyEntryOrExecution<QuantityT, OrderIdT> {
+pub enum BuyEntryOrExecution<QuantityT, PriceT, OrderIdT> {
     EnteredOrderBook {
         id: OrderIdT,
     },
     MutualFullExecution {
         seller: OrderIdT,
+        spread: Option<Positive<PriceT>>,
     },
     BuyerFullyExecuted {
         seller: OrderIdT,
+        spread: Option<Positive<PriceT>>,
         sellers_remaining: QuantityT,
     },
     SellerFullyExecuted {
         seller: OrderIdT,
+        spread: Option<Positive<PriceT>>,
         buyers_remaining: QuantityT,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
-pub enum SellEntryOrExecution<QuantityT, OrderIdT> {
+pub enum SellEntryOrExecution<QuantityT, PriceT, OrderIdT> {
     EnteredOrderBook {
         id: OrderIdT,
     },
     MutualFullExecution {
         buyer: OrderIdT,
+        spread: Option<Positive<PriceT>>,
     },
     BuyerFullyExecuted {
         buyer: OrderIdT,
+        spread: Option<Positive<PriceT>>,
         sellers_remaining: QuantityT,
     },
     SellerFullyExecuted {
         buyer: OrderIdT,
+        spread: Option<Positive<PriceT>>,
         buyers_remaining: QuantityT,
     },
 }
@@ -109,12 +115,12 @@ pub trait UnconditionalOrderBookApi<QuantityT, PriceT, OrderIdT>:
         &mut self,
         quantity: Positive<QuantityT>,
         unit_price: PriceT,
-    ) -> BuyEntryOrExecution<QuantityT, OrderIdT>;
+    ) -> BuyEntryOrExecution<QuantityT, PriceT, OrderIdT>;
     fn unconditional_sell(
         &mut self,
         quantity: Positive<QuantityT>,
         unit_price: PriceT,
-    ) -> SellEntryOrExecution<QuantityT, OrderIdT>;
+    ) -> SellEntryOrExecution<QuantityT, PriceT, OrderIdT>;
 }
 
 impl<T, QuantityT, PriceT, OrderIdT> UnconditionalOrderBookApi<QuantityT, PriceT, OrderIdT> for T
@@ -125,7 +131,7 @@ where
         &mut self,
         quantity: Positive<QuantityT>,
         unit_price: PriceT,
-    ) -> BuyEntryOrExecution<QuantityT, OrderIdT> {
+    ) -> BuyEntryOrExecution<QuantityT, PriceT, OrderIdT> {
         match self.conditional_buy(quantity, unit_price, |_| ControlFlow::<()>::Continue(())) {
             Ok(o) => o,
             Err(_) => {
@@ -138,7 +144,7 @@ where
         &mut self,
         quantity: Positive<QuantityT>,
         unit_price: PriceT,
-    ) -> SellEntryOrExecution<QuantityT, OrderIdT> {
+    ) -> SellEntryOrExecution<QuantityT, PriceT, OrderIdT> {
         match self.conditional_sell(quantity, unit_price, |_| ControlFlow::<()>::Continue(())) {
             Ok(o) => o,
             Err(_) => {

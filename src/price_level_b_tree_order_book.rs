@@ -6,6 +6,7 @@ use crate::util::{BTreeMapExt as _, NonEmpty};
 use num::Unsigned;
 use numwit::Positive;
 use std::fmt::Debug;
+use std::ops;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, VecDeque},
@@ -42,7 +43,7 @@ impl<QuantityT, PriceT> OrderBookApi<QuantityT, PriceT, uuid::Uuid>
     for PriceLevelBTreeOrderBook<QuantityT, PriceT, uuid::Uuid>
 where
     QuantityT: Unsigned + Clone + Ord + Debug,
-    PriceT: Clone + Ord + Debug,
+    PriceT: Clone + Ord + Debug + ops::Sub<Output = PriceT>,
 {
     #[tracing::instrument(skip(self, condition), ret)]
     fn conditional_buy<BuyAbortReasonT: Debug>(
@@ -52,7 +53,7 @@ where
         condition: impl FnOnce(
             ConditionalBuyArgs<'_, uuid::Uuid>,
         ) -> std::ops::ControlFlow<BuyAbortReasonT, ()>,
-    ) -> Result<BuyEntryOrExecution<QuantityT, uuid::Uuid>, BuyAbortReasonT> {
+    ) -> Result<BuyEntryOrExecution<QuantityT, PriceT, uuid::Uuid>, BuyAbortReasonT> {
         let quantity = quantity.into_inner();
         let entry_or_exc = match self.sells.first_entry() {
             // A trade could occur
@@ -71,6 +72,12 @@ where
                 let (ask_price, level) = ask_level.remove_entry();
                 let (remaining_level, (seller_id, seller_quantity)) = level.pop_front();
 
+                let spread = match ask_price.cmp(&unit_price) {
+                    Ordering::Less => Some(Positive::new_unchecked(unit_price - ask_price.clone())),
+                    Ordering::Equal => None,
+                    Ordering::Greater => unreachable!("already checked"),
+                };
+
                 match quantity.cmp(&seller_quantity) {
                     // buyer (us) wants less than the seller has
                     Ordering::Less => {
@@ -86,6 +93,7 @@ where
                         );
                         BuyEntryOrExecution::BuyerFullyExecuted {
                             seller: seller_id,
+                            spread,
                             sellers_remaining,
                         }
                     }
@@ -94,7 +102,10 @@ where
                         if let Some(remaining_level) = remaining_level {
                             self.sells.insert_uncontended(ask_price, remaining_level)
                         }
-                        BuyEntryOrExecution::MutualFullExecution { seller: seller_id }
+                        BuyEntryOrExecution::MutualFullExecution {
+                            seller: seller_id,
+                            spread,
+                        }
                     }
                     // buyer (us) wants more than the seller has
                     Ordering::Greater => {
@@ -105,6 +116,7 @@ where
                         }
                         BuyEntryOrExecution::SellerFullyExecuted {
                             seller: seller_id,
+                            spread,
                             buyers_remaining,
                         }
                     }
@@ -135,7 +147,7 @@ where
         condition: impl FnOnce(
             ConditionalSellArgs<'_, uuid::Uuid>,
         ) -> std::ops::ControlFlow<SellAbortReasonT, ()>,
-    ) -> Result<SellEntryOrExecution<QuantityT, uuid::Uuid>, SellAbortReasonT> {
+    ) -> Result<SellEntryOrExecution<QuantityT, PriceT, uuid::Uuid>, SellAbortReasonT> {
         let quantity = quantity.into_inner();
         let entry_or_exc = match self.buys.last_entry() {
             // A trade could occur
@@ -154,6 +166,14 @@ where
                 let (bid_price, level) = bid_level.remove_entry();
                 let (remaining_level, (buyer_id, buyer_quantity)) = level.pop_front();
 
+                let spread = match bid_price.cmp(&unit_price) {
+                    Ordering::Less => unreachable!("already checked"),
+                    Ordering::Equal => None,
+                    Ordering::Greater => {
+                        Some(Positive::new_unchecked(bid_price.clone() - unit_price))
+                    }
+                };
+
                 match quantity.cmp(&buyer_quantity) {
                     // seller (us) wants less than the buyer has
                     Ordering::Less => {
@@ -169,6 +189,7 @@ where
                         );
                         SellEntryOrExecution::SellerFullyExecuted {
                             buyer: buyer_id,
+                            spread,
                             buyers_remaining,
                         }
                     }
@@ -177,7 +198,10 @@ where
                         if let Some(remaining_level) = remaining_level {
                             self.buys.insert_uncontended(bid_price, remaining_level)
                         }
-                        SellEntryOrExecution::MutualFullExecution { buyer: buyer_id }
+                        SellEntryOrExecution::MutualFullExecution {
+                            buyer: buyer_id,
+                            spread,
+                        }
                     }
                     // seller (us) wants more than the buyer has
                     Ordering::Greater => {
@@ -188,6 +212,7 @@ where
                         }
                         SellEntryOrExecution::BuyerFullyExecuted {
                             buyer: buyer_id,
+                            spread,
                             sellers_remaining,
                         }
                     }
@@ -281,7 +306,7 @@ impl<QuantityT, PriceT> ReportingOrderBookApi<QuantityT, PriceT, uuid::Uuid>
     for PriceLevelBTreeOrderBook<QuantityT, PriceT, uuid::Uuid>
 where
     QuantityT: Unsigned + Clone + Ord + Debug,
-    PriceT: Clone + Ord + Debug,
+    PriceT: Clone + Ord + Debug + ops::Sub<Output = PriceT>,
 {
     fn buys(&self) -> Vec<Order<QuantityT, PriceT, uuid::Uuid>> {
         self.buys

@@ -94,6 +94,7 @@ where
     T: OrderBookApi<QuantityT, PriceT, OrderIdT>,
     OrderIdT: Debug,
     QuantityT: Debug + PartialOrd + Zero,
+    PriceT: Debug,
 {
     order_book
         .unconditional_buy(Positive::new(quantity).unwrap(), unit_price)
@@ -109,6 +110,7 @@ where
     T: OrderBookApi<QuantityT, PriceT, OrderIdT>,
     OrderIdT: Debug,
     QuantityT: Debug + PartialOrd + Zero,
+    PriceT: Debug,
 {
     order_book
         .unconditional_sell(Positive::new(quantity).unwrap(), unit_price)
@@ -173,14 +175,15 @@ pub fn single_resident_buy_is_fully_executed<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
     QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
-    PriceT: One,
+    PriceT: One + Debug + PartialEq,
     OrderIdT: Debug + PartialEq,
 {
     let mut order_book = T::default();
     let resident_buy = buy_unexecuted(&mut order_book, one(), one());
     assert_eq!(
         SellEntryOrExecution::MutualFullExecution {
-            buyer: resident_buy
+            buyer: resident_buy,
+            spread: None
         },
         order_book.unconditional_sell(one(), one()),
     );
@@ -191,7 +194,7 @@ pub fn single_resident_sell_is_fully_executed<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
     QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
-    PriceT: One,
+    PriceT: One + Debug + PartialEq,
     OrderIdT: Debug + PartialEq,
 {
     let mut order_book = T::default();
@@ -199,7 +202,8 @@ where
     assert_eq!(
         order_book.unconditional_buy(one(), one()),
         BuyEntryOrExecution::MutualFullExecution {
-            seller: resident_sell
+            seller: resident_sell,
+            spread: None
         }
     );
     assert!(is_empty(&order_book));
@@ -259,17 +263,24 @@ where
     let miserly = buy_unexecuted(&mut order_book, one(), one());
     let generous_and_late = buy_unexecuted(&mut order_book, one(), two());
     assert_eq!(
-        SellEntryOrExecution::MutualFullExecution { buyer: generous },
-        order_book.unconditional_sell(one(), one())
-    );
-    assert_eq!(
         SellEntryOrExecution::MutualFullExecution {
-            buyer: generous_and_late
+            buyer: generous,
+            spread: Some(Positive::new_unchecked(one()))
         },
         order_book.unconditional_sell(one(), one())
     );
     assert_eq!(
-        SellEntryOrExecution::MutualFullExecution { buyer: miserly },
+        SellEntryOrExecution::MutualFullExecution {
+            buyer: generous_and_late,
+            spread: Some(Positive::new_unchecked(one()))
+        },
+        order_book.unconditional_sell(one(), one())
+    );
+    assert_eq!(
+        SellEntryOrExecution::MutualFullExecution {
+            buyer: miserly,
+            spread: None
+        },
         order_book.unconditional_sell(one(), one())
     );
 }
@@ -286,17 +297,24 @@ where
     let expensive = sell_unexecuted(&mut order_book, one(), two());
     let cheap_and_late = sell_unexecuted(&mut order_book, one(), one());
     assert_eq!(
-        BuyEntryOrExecution::MutualFullExecution { seller: cheap },
-        order_book.unconditional_buy(one(), two())
-    );
-    assert_eq!(
         BuyEntryOrExecution::MutualFullExecution {
-            seller: cheap_and_late
+            seller: cheap,
+            spread: Some(Positive::new_unchecked(one()))
         },
         order_book.unconditional_buy(one(), two())
     );
     assert_eq!(
-        BuyEntryOrExecution::MutualFullExecution { seller: expensive },
+        BuyEntryOrExecution::MutualFullExecution {
+            seller: cheap_and_late,
+            spread: Some(Positive::new_unchecked(one()))
+        },
+        order_book.unconditional_buy(one(), two())
+    );
+    assert_eq!(
+        BuyEntryOrExecution::MutualFullExecution {
+            seller: expensive,
+            spread: None
+        },
         order_book.unconditional_buy(one(), two())
     );
 }
