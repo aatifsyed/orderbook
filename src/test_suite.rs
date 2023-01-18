@@ -54,17 +54,22 @@ where
     PriceT: PartialEq,
 {
     fn eq(&self, other: &Order<QuantityT, PriceT, OrderIdT>) -> bool {
-        if let Some(quantity) = &self.quantity {
+        let Self {
+            quantity,
+            unit_price,
+            id,
+        } = self;
+        if let Some(quantity) = quantity {
             if *quantity != other.quantity {
                 return false;
             }
         }
-        if let Some(unit_price) = &self.unit_price {
+        if let Some(unit_price) = unit_price {
             if *unit_price != other.unit_price {
                 return false;
             }
         }
-        if let Some(id) = &self.id {
+        if let Some(id) = id {
             if *id != other.id {
                 return false;
             }
@@ -97,7 +102,7 @@ where
     PriceT: Debug,
 {
     order_book
-        .unconditional_buy(Positive::new(quantity).unwrap(), unit_price)
+        .unconditional_buy(positive(quantity), unit_price)
         .into_entered_order_book()
         .expect("buy should not have executed")
 }
@@ -113,9 +118,15 @@ where
     PriceT: Debug,
 {
     order_book
-        .unconditional_sell(Positive::new(quantity).unwrap(), unit_price)
+        .unconditional_sell(positive(quantity), unit_price)
         .into_entered_order_book()
         .expect("sell should not have executed")
+}
+fn positive<T>(t: T) -> Positive<T>
+where
+    T: Debug + Zero + PartialOrd,
+{
+    Positive::new(t).unwrap()
 }
 
 ////////////////
@@ -255,7 +266,7 @@ pub fn buys_execute_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
     QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
-    PriceT: One + Zero + Debug + PartialEq,
+    PriceT: One + Zero + Debug + PartialEq + PartialOrd,
     OrderIdT: Debug + PartialEq,
 {
     let mut order_book = T::default();
@@ -265,14 +276,14 @@ where
     assert_eq!(
         SellEntryOrExecution::MutualFullExecution {
             buyer: generous,
-            spread: Some(Positive::new_unchecked(one()))
+            spread: Some(positive(one()))
         },
         order_book.unconditional_sell(one(), one())
     );
     assert_eq!(
         SellEntryOrExecution::MutualFullExecution {
             buyer: generous_and_late,
-            spread: Some(Positive::new_unchecked(one()))
+            spread: Some(positive(one()))
         },
         order_book.unconditional_sell(one(), one())
     );
@@ -289,7 +300,7 @@ pub fn sells_execute_with_price_time_priority<T, QuantityT, PriceT, OrderIdT>()
 where
     T: ReportingOrderBookApi<QuantityT, PriceT, OrderIdT> + Default,
     QuantityT: One + Debug + PartialEq + PartialOrd + Zero,
-    PriceT: One + Zero + Debug + PartialEq,
+    PriceT: One + Zero + Debug + PartialEq + PartialOrd,
     OrderIdT: Debug + PartialEq,
 {
     let mut order_book = T::default();
@@ -299,14 +310,14 @@ where
     assert_eq!(
         BuyEntryOrExecution::MutualFullExecution {
             seller: cheap,
-            spread: Some(Positive::new_unchecked(one()))
+            spread: Some(positive(one()))
         },
         order_book.unconditional_buy(one(), two())
     );
     assert_eq!(
         BuyEntryOrExecution::MutualFullExecution {
             seller: cheap_and_late,
-            spread: Some(Positive::new_unchecked(one()))
+            spread: Some(positive(one()))
         },
         order_book.unconditional_buy(one(), two())
     );
