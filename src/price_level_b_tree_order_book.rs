@@ -5,12 +5,11 @@ use crate::api::{
 use crate::util::{BTreeMapExt as _, NonEmpty};
 use num::Unsigned;
 use numwit::Positive;
-use std::fmt::Debug;
-use std::ops;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, VecDeque},
-    ops::ControlFlow,
+    fmt::Debug,
+    ops::{self, ControlFlow},
 };
 use tap::Tap as _;
 
@@ -43,7 +42,7 @@ impl<QuantityT, PriceT> OrderBookApi<QuantityT, PriceT, uuid::Uuid>
     for PriceLevelBTreeOrderBook<QuantityT, PriceT, uuid::Uuid>
 where
     QuantityT: Unsigned + Clone + Ord + Debug,
-    PriceT: Clone + Ord + Debug + ops::Sub<Output = PriceT>,
+    PriceT: Clone + Ord + Debug + ops::Sub<Output = PriceT> + num::Zero,
 {
     #[tracing::instrument(skip(self, condition), ret)]
     fn conditional_buy<BuyAbortReasonT: Debug>(
@@ -73,7 +72,7 @@ where
                 let (remaining_level, (seller_id, seller_quantity)) = level.pop_front();
 
                 let spread = match ask_price.cmp(&unit_price) {
-                    Ordering::Less => Some(Positive::new_unchecked(unit_price - ask_price.clone())),
+                    Ordering::Less => Some(Positive::new(unit_price - ask_price.clone()).unwrap()),
                     Ordering::Equal => None,
                     Ordering::Greater => unreachable!("already checked"),
                 };
@@ -170,7 +169,7 @@ where
                     Ordering::Less => unreachable!("already checked"),
                     Ordering::Equal => None,
                     Ordering::Greater => {
-                        Some(Positive::new_unchecked(bid_price.clone() - unit_price))
+                        Some(Positive::new(bid_price.clone() - unit_price).unwrap())
                     }
                 };
 
@@ -306,7 +305,7 @@ impl<QuantityT, PriceT> ReportingOrderBookApi<QuantityT, PriceT, uuid::Uuid>
     for PriceLevelBTreeOrderBook<QuantityT, PriceT, uuid::Uuid>
 where
     QuantityT: Unsigned + Clone + Ord + Debug,
-    PriceT: Clone + Ord + Debug + ops::Sub<Output = PriceT>,
+    PriceT: Clone + Ord + Debug + ops::Sub<Output = PriceT> + num::Zero,
 {
     fn buys(&self) -> Vec<Order<QuantityT, PriceT, uuid::Uuid>> {
         self.buys
